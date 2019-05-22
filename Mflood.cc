@@ -16,17 +16,18 @@ public:
     MfloodHeaderClass() : PacketHeaderClass("PacketHeader/MFLOOD", sizeof(hdr_mflood_pkt)) {
         bind_offset(&hdr_mflood_pkt::offset_);
     }
-}class_rtProtoMflood_hdr;
+}class_Mflood_hdr;
 
 static class MfloodClass : public TclClass
 {
 public:
     MfloodClass() : TclClass("Agent/MFLOOD") {}
-    TclObject* create(int argc, const char*const* argv) {
-        assert(argc==5);
-        return(new Mflood((nsaddr_t)Address::instance().str2addr(argv[4])));
+    TclObject* create(int, const char*const* ) {
+        return(new Mflood());
     }
-}class_rtProtoMflood;
+}class_Mflood;
+
+Mflood::Mflood() : Agent(PT_PING) {}
 
 void
 Mflood_PktTimer::expire(Event* e) {
@@ -41,38 +42,23 @@ Mflood::Mflood(nsaddr_t id) : Agent(PT_MFLOOD), pkt_timer_(this) {
 
 int
 Mflood::command(int argc, const char*const* argv) {
-    if(argc == 2) {
-        if (strcasecmp(argv[1], "start") == 0) {
+    if(argc == 3) {
+        if (strcmp(argv[1], "port-dmux") == 0) {
+            dmux_ = (PortClassifier *)TclObject::lookup (argv[2]);
+            if (dmux_ == 0) {
+                fprintf (stderr, "%s: %s lookup of %s failed\n", __FILE__, argv[1], argv[2]);
+                return TCL_ERROR;
+            }
             pkt_timer_.resched(0.0);
             return TCL_OK;
         }
-        else if (strcasecmp(argv[1],"print_rtable") == 0) {
-            if(logtarget_ != 0) {
-                sprintf(logtarget_->pt_->buffer(), "P %f _%d_ Routing Table", CURRENT_TIME, ra_addr());
-                logtarget_->pt_->dump();
-                rtable_.print(logtarget_);
-            }
-            else {
-                fprintf(stdout, "%f _%d_ If you want to print this routing table ""you must create a trace file in your TCL Script",CURRENT_TIME, ra_addr());
-            }
-            return TCL_OK;
-        }
-    }
-    else if (argc == 3) {
-        //Obtains corresponding dmux to carry packets to upper layer
-        if (strcmp(argv[1], "port-dmux") == 0) {
-            dmux_ = (PortClassifier*)TclObject::lookup(argv[2]);
-            if (dmux_ == 0) {
-                fprintf(stderr, "%s: %s lookup of %s failed \n", __FILE__,argv[1],argv[2]);
+        else if (strcmp(argv[1], "tracetarget") == 0) {
+            tracetarget_ = (Trace *)TclObject::lookup (argv[2]);
+            if (tracetarget_ == 0) {
+                fprintf (stderr, "%s: %s lookup of %s failed\n", __FILE__, argv[1],
+                         argv[2]);
                 return TCL_ERROR;
             }
-            return TCL_OK;
-        }
-        //Obtains corresponding tracer
-        else if (strcmp(argv[1], "log-target") == 0 || strcmp(argv[1], "tracetarget") == 0) {
-            logtarget_ = (Trace*)TclObject::lookup(argv[2]);
-            if (logtarget_ == 0)
-                return TCL_ERROR;
             return TCL_OK;
         }
     }
@@ -130,25 +116,25 @@ Mflood::recv_mflood_pkt(Packet* p) {
 void
 Mflood::send_mflood_pkt() {
     Packet* p                        = allocpkt();
-    struct hdr_cmn* ch                = HDR_CMN(p);
+    struct hdr_cmn* ch               = HDR_CMN(p);
     struct hdr_ip* ih                = HDR_IP(p);
-    struct hdr_mflood_pkt* ph     = HDR_MFLOOD_PKT(p);
+    struct hdr_mflood_pkt* ph        = HDR_MFLOOD_PKT(p);
     
-    ph->pkt_src()                     = ra_addr();
+    ph->pkt_src()                    = ra_addr();
     ph->pkt_len()                    = 7;
     ph->pkt_seq_num()                = seq_num_++;
     
-    ch->ptype()                        = PT_MFLOOD;
-    ch->direction()                    = hdr_cmn::DOWN;
-    ch->size()                        = IP_HDR_LEN + ph->pkt_len();
-    ch->error()                        = 0;
-    ch->next_hop()                    = IP_BROADCAST;
-    ch->addr_type()                    = NS_AF_INET;
+    ch->ptype()                      = PT_MFLOOD;
+    ch->direction()                  = hdr_cmn::DOWN;
+    ch->size()                       = IP_HDR_LEN + ph->pkt_len();
+    ch->error()                      = 0;
+    ch->next_hop()                   = IP_BROADCAST;
+    ch->addr_type()                  = NS_AF_INET;
     
-    ih->saddr()                     = ra_addr();
-    ih->daddr()                        = IP_BROADCAST;
-    ih->sport()                        = RT_PORT;
-    ih->dport()                        = RT_PORT;
+    ih->saddr()                      = ra_addr();
+    ih->daddr()                      = IP_BROADCAST;
+    ih->sport()                      = RT_PORT;
+    ih->dport()                      = RT_PORT;
     ih->ttl()                        = IP_DEF_TTL;
     
     Scheduler::instance().schedule(target_, p, JITTER);
