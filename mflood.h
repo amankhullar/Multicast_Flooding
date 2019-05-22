@@ -46,7 +46,7 @@ class Mflood : public Agent {
     protected :
     
     PortClassifier*     dmux_;            //For Passing Packets Up To Agents
-    Trace*                logtarget_;        //For Logging
+    Trace*              logtarget_;        //For Logging
     Mflood_PktTimer     pkt_timer_;        //Timer for sending packets
     
     inline nsaddr_t&         ra_addr()             {return ra_addr_; }
@@ -63,7 +63,8 @@ public:
     Mflood(nsaddr_t);
     int command(int, const char*const*);
     void recv(Packet*, Handler*);
-    
+    int node_x = 0;
+    int node_y = 0;
 };
 
 #endif /* MFLOOD_H_ */

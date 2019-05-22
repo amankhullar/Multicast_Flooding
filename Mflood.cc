@@ -27,7 +27,10 @@ public:
     }
 }class_Mflood;
 
-Mflood::Mflood() : Agent(PT_PING) {}
+Mflood::Mflood() : Agent(PT_MFLOOD) {
+    bind("node_x_otcl", &node_x);
+    bind("node_y_otcl", &node_y);
+}
 
 void
 Mflood_PktTimer::expire(Event* e) {
