@@ -71,22 +71,37 @@ Mflood::recv(Packet* p, Handler* h) {
     struct hdr_cmn* ch    = HDR_CMN(p);
     struct hdr_ip* ih     = HDR_IP(p);
     
-    if (ih->saddr() == ra_addr()){
-        //If there exists a routing loop, drop the packet
-        if(ch->num_forwards() > 0) {
-            drop(p, DROP_RTR_ROUTE_LOOP);
-            return;
+    // If it is a mflood packet, must process it
+    if(ch->ptype() == PT_MFLOOD) {
+        ih->ttl_ -= 1;
+        int fwd = 1
+        fwd = recv_mflood_pkt(p);
+        if(fwd){
+            forward_data(p);
         }
-        
-        //else if this is a packet I am originating, must add IP header
-        else if(ch->num_forwards() == 0)
-            ch->size() += IP_HDR_LEN;
+        return;
     }
     
-    // If it is a mflood packet, must process it
-    if(ch->ptype() == PT_MFLOOD)
-        recv_mflood_pkt(p);
+    // Must be an originating packet
+    if((ih->saddr() == index) && (ch->num_forwards() == 0)) {
+        if (ch->ptype() != PT_TCP && ch->ptype() != PT_ACK) {
+            ch->size() += IP_HDR_LEN;
+        }
+        // Added by Parag Dadhania && John Novatnack to handle broadcasting
+        if ( (u_int32_t)ih->daddr() != IP_BROADCAST) {
+            ih->ttl_ = NETWORK_DIAMETER;
+        }
+    }
     
+    /*
+     *  I received a packet that I sent.  Probably
+     *  a routing loop.
+     */
+    else if(ih->saddr() == index) {
+        drop(p, DROP_RTR_ROUTE_LOOP);
+        return;
+    }
+
     //Otherwise, must forward the packet (unless TTL reaches zero
     else {
         ih->ttl_--;
@@ -94,23 +109,22 @@ Mflood::recv(Packet* p, Handler* h) {
             drop(p, DROP_RTR_TTL);
             return;
         }
-        forward_data(p);
     }
 }
 
-void
+int
 Mflood::recv_mflood_pkt(Packet* p) {
     struct hdr_ip* ih                = HDR_IP(p);
-    struct hdr_mflood_pkt* ph    = HDR_MFLOOD_PKT(p);
-    
-    // All routing messages are sent from and to port RT_PORT, so we shall check it
-    assert(ih->sport() == RT_PORT);
-    assert(ih->dport() == RT_PORT);
+    struct hdr_mflood_pkt* ph        = HDR_MFLOOD_PKT(p);
     
     /* processing of mflood packet */
-    
+    if (ih->daddr() == here_.addr_ &&  node_x <= ph->pkt_max_x_geo_loc() && node_x >= ph->pkt_min_x_geo_loc() && node_y <= ph->pkt_max_y_geo_loc() && node_y >= ph->pkt_min_y_geo_loc()) {
+        printf("Received Multicast packet\n");
+        dmux_ -> recv(p, 0);
+    }
     // Release resources
     Packet::free(p);
+    return 0;
 }
 
 void
@@ -123,6 +137,15 @@ Mflood::send_mflood_pkt() {
     ph->pkt_src()                    = ra_addr();
     ph->pkt_len()                    = 7;
     ph->pkt_seq_num()                = seq_num_++;
+    ph->pkt_max_x_geo_loc()          = ph->pkt_max_x_geo_loc()
+    ph->pkt_min_x_geo_loc()          = ph->pkt_min_x_geo_loc()
+    ph->pkt_max_y_geo_loc()          = ph->pkt_max_y_geo_loc()
+    ph->pkt_min_y_geo_loc()          = ph->pkt_min_y_geo_loc()
+    
+    ph->pkt_max_x_fwd_loc()          = ph->pkt_max_x_fwd_loc()
+    ph->pkt_min_x_fwd_loc()          = ph->pkt_min_x_fwd_loc()
+    ph->pkt_max_y_fwd_loc()          = ph->pkt_max_y_fwd_loc()
+    ph->pkt_min_y_fwd_loc()          = ph->pkt_min_y_fwd_loc()
     
     ch->ptype()                      = PT_MFLOOD;
     ch->direction()                  = hdr_cmn::DOWN;
@@ -149,26 +172,11 @@ void
 Mflood::forward_data(Packet* p) {
     struct hdr_cmn* ch = HDR_CMN(p);
     struct hdr_ip* ih = HDR_IP(p);
+    struct hdr_mflood_pkt* ph        = HDR_MFLOOD_PKT(p);
     
-    if(ch->direction() == hdr_cmn::UP && ((u_int32_t)ih->daddr() == IP_BROADCAST || ih->daddr() == ra_addr())) {
+    if(ch->direction() == hdr_cmn::UP && node_x <= ph->pkt_max_x_fwd_loc() && node_x >= ph->pkt_min_x_fwd_loc() && node_y <= ph->pkt_max_y_fwd_loc() && node_y >= ph->pkt_min_y_fwd_loc()) {
+        send_mflood_pkt()
         dmux_->recv(p, NULL);
         return;
-    }
-    else {
-        ch->direction() = hdr_cmn::DOWN;
-        ch->addr_type() = NS_AF_INET;
-        if ((u_int32_t)ih->daddr() == IP_BROADCAST)
-            ch->next_hop() = IP_BROADCAST;
-        else {
-            nsaddr_t next_hop = rtable_.lookup(ih->daddr());
-            if(next_hop == IP_BROADCAST) {
-                debug("%f: Agent %d can not forward a packet destined to %d \n", CURRENT_TIME,ra_addr(),ih->daddr());
-                drop(p, DROP_RTR_NO_ROUTE);
-                return;
-            }
-            else
-                ch->next_hop() =  next_hop;
-        }
-        Scheduler::instance().schedule(target_, p, 0.0);
     }
 }
