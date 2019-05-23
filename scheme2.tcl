@@ -2,8 +2,9 @@ Mac/Simple set bandwidth_ 1Mb
 
 set MESSAGE_PORT 42
 set BROADCAST_ADDR -1
-
-
+set delta 100
+set MRX 280
+set MRY 1115
 # variables which control the number of nodes and how they're grouped
 # (see topology creation code below)
 set group_size 4
@@ -12,7 +13,7 @@ set num_nodes [expr $group_size * $num_groups]
 set val(chan)           Channel/WirelessChannel    ;# Channel Type
 set val(prop)           Propagation/TwoRayGround   ;# radio-propagation model
 set val(netif)          Phy/WirelessPhy            ;# network interface type
-set val(mac)		    Mac/Simple
+set val(mac)		Mac/Simple
 set val(ifq)            Queue/DropTail/PriQueue    ;# interface queue type
 set val(ll)             LL                         ;# link layer type
 set val(ant)            Antenna/OmniAntenna        ;# antenna model
@@ -76,31 +77,47 @@ Class Agent/MessagePassing/Flooding -superclass Agent/MessagePassing
 
 Agent/MessagePassing/Flooding instproc recv {source sport size data} {
     $self instvar messages_seen node_
-    global ns BROADCAST_ADDR 
-    set Locationx [$node_ set X_ ]
-    set Locationy [$node_ set Y_ ]
+    global ns BROADCAST_ADDR MRX MRY delta
+
     # extract message ID from message
     set message_id [lindex [split $data ":"] 0]
+    set message_data [lindex [split $data ":"] 1]
+    set senderX [lindex [split $data ":"] 2]
+    set senderY [lindex [split $data ":"] 3]
+    set currX [$node_ set X_ ]
+    set currY [$node_ set Y_ ]
+    set distS [expr ($senderX - $MRX)*($senderX - $MRX) + ($senderY - $MRY)*($senderY - $MRY) ]
+    set distC [expr ($currX - $MRX)*($currX - $MRX) + ($currY - $MRY)*($currY - $MRY) ]
     puts "\nNode [$node_ node-addr] got message $message_id\n"
-    if {[lsearch $messages_seen $message_id] == -1 && [expr $Locationx >= 200 && $Locationx <= 360] && [expr $Locationy >= 0 && $Locationy <= 1310]} {
+    
+    if {[lsearch $messages_seen $message_id] == -1 && [expr [expr $distS + $delta] >= $distC ]} {
 	lappend messages_seen $message_id
+	set data "$message_id:$message_data:$currX:$currY"
         $ns trace-annotate "[$node_ node-addr] received {$data} from $source"
         $ns trace-annotate "[$node_ node-addr] sending message $message_id"
 	$self sendto $size $data $BROADCAST_ADDR $sport
     } else {
+	if {[lsearch $messages_seen $message_id] == -1 && [expr $senderX >= 200 && $senderX <= 360] && [expr $senderY >= 920 && $senderY <= 1310] } {
+	lappend messages_seen $message_id
+	set data "$message_id:$message_data:$senderX:$senderY"
+        $ns trace-annotate "[$node_ node-addr] received {$data} from $source"
+        $ns trace-annotate "[$node_ node-addr] sending message $message_id"
+	$self sendto $size $data $BROADCAST_ADDR $sport
+	} else {
         $ns trace-annotate "[$node_ node-addr] received redundant message $message_id from $source"
+	}
     }
 }
 
 
 Agent/MessagePassing/Flooding instproc send_message {size message_id data port} {
     $self instvar messages_seen node_
-    set Locationx [$node_ set X_ ]
-    set Locationy [$node_ set Y_ ]
     global ns MESSAGE_PORT BROADCAST_ADDR
+    set X [$node_ set X_ ]
+    set Y [$node_ set Y_ ]
     lappend messages_seen $message_id
     $ns trace-annotate "[$node_ node-addr] sending message $message_id"
-    $self sendto $size "$message_id:$data" $BROADCAST_ADDR $port
+    $self sendto $size "$message_id:$data:$X:$Y" $BROADCAST_ADDR $port
 }
 
 
@@ -113,7 +130,6 @@ for {set i 0} {$i < $num_nodes} {incr i} {
     $n($i) set Z_ 0.0
     $ns initial_node_pos $n($i) 50
 }
-
 
 
 # attach a new Agent/MessagePassing/Flooding to each node on port $MESSAGE_PORT
